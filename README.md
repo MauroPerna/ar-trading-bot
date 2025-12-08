@@ -126,13 +126,6 @@ Two optimizers available:
 poetry run pytest
 ```
 
-### Manual backtest
-
-```bash
-# Via API
-curl http://localhost:8000/api/v1/research/run?symbol=AAPL.BA
-```
-
 ### Environment modes
 
 - `development`: Auto-creates default portfolio, enables hot reload
@@ -163,6 +156,3 @@ docker-compose down
 docker-compose down -v
 ```
 
-## License
-
-MIT
