@@ -13,8 +13,8 @@ Algorithmic trading system for the Argentine market (CEDEARs). Combines data ing
 ### 1. Clone and setup environment
 
 ```bash
-git clone <repository-url>
-cd trading-system
+git clone https://github.com/MauroPerna/ar-trading-bot
+cd ar-trading-bot
 
 # Copy environment file
 cp .env.example .env
