@@ -16,11 +16,11 @@ from src.infrastructure.database.repositories.portfolio_repository import (
 
 class FakeBrokerClient(BrokerClient):
     """
-    Fake broker que:
-    - opera 100% contra la DB (PortfolioModel)
-    - no guarda nada en memoria excepto órdenes retornadas
-    - llena órdenes instantáneamente
-    - obtiene precios desde un price_provider async (ej: YFinanceService)
+    Fake broker that:
+    - operates 100% against the DB (PortfolioModel)
+    - stores nothing in memory except returned orders
+    - fills orders instantly
+    - gets prices from an async price_provider (e.g., YFinanceService)
     """
 
     def __init__(
@@ -72,18 +72,18 @@ class FakeBrokerClient(BrokerClient):
     # ---------------------------------------------------------------------
     async def place_order(self, order: OrderDTO) -> OrderDTO:
         """
-        Lógica:
-        1) Obtener precio con price_provider (async)
-        2) Crear orden ejecutada
-        3) Actualizar cash + posición en DB
-        4) Devolver OrderDTO ejecutada (la persistencia real la hace OrderRepository)
+        Logic:
+        1) Get price from price_provider (async)
+        2) Create executed order
+        3) Update cash + position in DB
+        4) Return executed OrderDTO (actual persistence done by OrderRepository)
         """
         await self._ensure_auth()
 
         price = self._price_provider.get_lastest_price(order.symbol)
 
         if price is None:
-            raise ValueError(f"No se pudo obtener precio para {order.symbol}")
+            raise ValueError(f"Could not get price for {order.symbol}")
 
         broker_id = str(uuid4())
 
@@ -99,7 +99,7 @@ class FakeBrokerClient(BrokerClient):
 
         notional = price * order.quantity
 
-        # ACTUALIZAR PORTFOLIO EN DB
+        # UPDATE PORTFOLIO IN DB
         async with self.db_client.get_session() as session:
             repo = PortfolioRepository(session)
             portfolio = await repo.get_portfolio_dto(initial_cash=self._initial_cash)
@@ -125,7 +125,7 @@ class FakeBrokerClient(BrokerClient):
             )
             await repo.save_portfolio_dto(updated)
 
-        # Guardamos la orden localmente (solo para consultas)
+        # Store order locally (only for queries)
         self._orders[broker_id] = executed_order
         return executed_order
 
@@ -169,7 +169,7 @@ class FakeBrokerClient(BrokerClient):
             if price is None:
                 continue
 
-            # Sin avg_price real (FakeBroker), usamos price mismo
+            # No real avg_price (FakeBroker), use price itself
             result.append(
                 {
                     "symbol": symbol,

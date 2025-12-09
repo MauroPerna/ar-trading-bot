@@ -45,14 +45,14 @@ class YFinanceService(OHLCVService):
         symbols: Optional[Union[str, List[str]]]
     ) -> List[str]:
         if symbols is None:
-            raise ValueError("symbols no puede ser None aquí")
+            raise ValueError("symbols cannot be None here")
         if isinstance(symbols, str):
             symbols = [symbols]
         return [s for s in symbols if isinstance(s, str) and s.strip()]
 
     @staticmethod
     def _normalize_index_tz(df: pd.DataFrame) -> pd.DataFrame:
-        """Asegura DatetimeIndex tz-naive y ordenado."""
+        """Ensures tz-naive and sorted DatetimeIndex."""
         if not isinstance(df.index, pd.DatetimeIndex):
             df = df.copy()
             df.index = pd.to_datetime(df.index)

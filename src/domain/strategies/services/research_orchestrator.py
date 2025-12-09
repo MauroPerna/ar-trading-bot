@@ -52,7 +52,7 @@ class ResearchOrchestrator:
             for symbol, reports in results.items():
                 if not reports:
                     logger.warning(
-                        f"⚠️ No hay reports para {symbol}, no se persiste nada"
+                        f"⚠️ No reports for {symbol}, nothing persisted"
                     )
                     continue
 

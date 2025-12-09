@@ -153,8 +153,8 @@ class PortfolioWeightsRepository:
             await self.session.refresh(m)
 
         logger.info(
-            f"💾 Guardados {len(models)} portfolio_weights activos "
-            f"para timeframe={timeframe}, optimizer={optimizer_name}, "
+            f"💾 Saved {len(models)} active portfolio_weights "
+            f"for timeframe={timeframe}, optimizer={optimizer_name}, "
             f"rebalance_date={rebalance_date.isoformat()}"
         )
 

@@ -51,11 +51,11 @@ class TrendAnalyzer:
 
             self.df['slope'] = slopes
             logger.info(
-                f"✅ Rolling slopes calculadas: {np.sum(~np.isnan(slopes))} valores válidos"
+                f"✅ Rolling slopes calculated: {np.sum(~np.isnan(slopes))} valid values"
             )
 
         except Exception as e:
-            logger.error(f"❌ Error calculando rolling slopes: {e}")
+            logger.error(f"❌ Error calculating rolling slopes: {e}")
             self.df['slope'] = slopes
 
         return self.df
@@ -96,10 +96,10 @@ class TrendAnalyzer:
             assert len(self.df['trend_signal']) == len(self.df)
 
             logger.info(
-                f"✅ Trend signals calculadas: threshold={threshold:.6f}")
+                f"✅ Trend signals calculated: threshold={threshold:.6f}")
 
         except Exception as e:
-            logger.error(f"❌ Error calculando trend signals: {e}")
+            logger.error(f"❌ Error calculating trend signals: {e}")
             self.df['trend_signal'] = 0
 
         return self.df
@@ -124,12 +124,12 @@ class TrendAnalyzer:
                 )
 
             logger.info(
-                f"✅ TrendAnalyzer completado exitosamente: {final_length} registros"
+                f"✅ TrendAnalyzer completed successfully: {final_length} records"
             )
             return self.df
 
         except Exception as e:
-            logger.error(f"❌ TrendAnalyzer falló: {e}")
+            logger.error(f"❌ TrendAnalyzer failed: {e}")
             self.df['slope'] = np.nan
             self.df['trend_signal'] = 0
             return self.df

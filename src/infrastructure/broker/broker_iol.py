@@ -161,20 +161,20 @@ class IOLClient(BrokerClient):
 
     def _map_iol_portfolio_to_dto(self, data: Dict[str, Any]) -> PortfolioDTO:
         """
-        Mapea la respuesta cruda de IOL a PortfolioDTO.
+        Maps raw IOL response to PortfolioDTO.
 
-        Asunciones (ajustá si la API real difiere):
-        - data["efectivo"]["saldo"] -> efectivo disponible
-        - data["posiciones"] -> lista de objetos con:
+        Assumptions (adjust if actual API differs):
+        - data["efectivo"]["saldo"] -> available cash
+        - data["posiciones"] -> list of objects with:
             - "simbolo" / "ticker"
             - "cantidad"
         """
-        # efectivo
+        # cash
         try:
             efectivo = float(data.get("efectivo", {}).get("saldo", 0.0))
         except Exception:
             logger.warning(
-                "No se pudo parsear efectivo de la respuesta de IOL, usando 0.0")
+                "Could not parse cash from IOL response, using 0.0")
             efectivo = 0.0
 
         positions_dict: Dict[str, float] = {}

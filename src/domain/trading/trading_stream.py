@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 
 def setup_trading_stream(trading_service: TradingService) -> None:
     """
-    Conecta el bus de señales con el TradingService usando RxPy.
+    Connects signal bus to TradingService using RxPy.
     """
 
     def _handle_signal_async(signal: SignalDTO) -> None:
         logger.info(
-            f"🔔 Nueva señal recibida en trading stream: "
+            f"🔔 New signal received in trading stream: "
             f"{signal.symbol} - {signal.signal_type.value} "
             f"({signal.strength.value}, conf={signal.confidence:.2f})"
         )
@@ -32,9 +32,9 @@ def setup_trading_stream(trading_service: TradingService) -> None:
 
     signal_bus.pipe(
         ops.filter(lambda s: s is not None),
-        # agrupar por símbolo
+        # group by symbol
         ops.group_by(lambda s: s.symbol),
-        # dentro de cada símbolo, evitamos repeticiones muy parecidas
+        # within each symbol, avoid similar repetitions
         ops.flat_map(
             lambda group: group.pipe(
                 ops.distinct_until_changed(_distinct_key),
@@ -42,8 +42,8 @@ def setup_trading_stream(trading_service: TradingService) -> None:
         ),
     ).subscribe(
         on_next=_handle_signal_async,
-        on_error=lambda e: logger.error(f"❌ Error en trading stream: {e}"),
-        on_completed=lambda: logger.info("✔️ trading stream completado"),
+        on_error=lambda e: logger.error(f"❌ Error in trading stream: {e}"),
+        on_completed=lambda: logger.info("✔️ Trading stream completed"),
     )
 
-    logger.info("🔗 Trading stream conectado a signal_bus")
+    logger.info("🔗 Trading stream connected to signal_bus")

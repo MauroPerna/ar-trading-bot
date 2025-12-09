@@ -164,11 +164,11 @@ class EnricherService:
             if class_name == 'BreakoutAnalyzer':
                 result_df = analyzer_class(
                     df, timeframe=timeframe).analyze()
-                logger.info(f"✅ {class_name} completado")
+                logger.info(f"✅ {class_name} completed")
                 return result_df
             else:
                 result_df = analyzer_class(df).analyze()
-                logger.info(f"✅ {class_name} completado")
+                logger.info(f"✅ {class_name} completed")
                 return result_df
 
         except ImportError as e:

@@ -16,8 +16,8 @@ RISK_SIGNAL_TTL_DAYS = 90
 
 class RiskInterpreter(BaseStrategyInterpreter):
     """
-    Evalúa riesgo: volatilidad (ATR), condiciones desfavorables y calidad del análisis.
-    Genera ALERT o HOLD según gravedad.
+    Evaluates risk: volatility (ATR), unfavorable conditions, and analysis quality.
+    Generates ALERT or HOLD based on severity.
     """
 
     def interpret(
@@ -26,14 +26,14 @@ class RiskInterpreter(BaseStrategyInterpreter):
         config: StrategyConfigDTO,
     ) -> List[SignalDTO]:
 
-        logger.info("⚠️ Evaluando condiciones de riesgo...")
+        logger.info("⚠️ Evaluating risk conditions...")
 
         signals: List[SignalDTO] = []
 
         if df.empty:
             return signals
 
-        # Si la estrategia NO usa ATR o riesgo, no emitimos señales
+        # If strategy does NOT use ATR or risk, we don't emit signals
         uses_risk = (
             config.params.risk.stop_loss_pct is not None
             or config.params.risk.take_profit_pct is not None
@@ -60,7 +60,7 @@ class RiskInterpreter(BaseStrategyInterpreter):
             if current_atr and avg_atr and not pd.isna(current_atr) and not pd.isna(avg_atr):
                 atr_ratio = current_atr / avg_atr
 
-                # Riesgo alto → precaución
+                # High risk → caution
                 if atr_ratio > 1.5:
                     signals.append(
                         SignalDTO(
@@ -81,7 +81,7 @@ class RiskInterpreter(BaseStrategyInterpreter):
                         )
                     )
 
-                # Volatilidad extremadamente baja → HOLD (riesgo de falsa señal)
+                # Extremely low volatility → HOLD (risk of false signal)
                 elif atr_ratio < 0.6:
                     signals.append(
                         SignalDTO(
@@ -130,5 +130,5 @@ class RiskInterpreter(BaseStrategyInterpreter):
                 )
             )
 
-        logger.info(f"✅ Risk analysis: {len(signals)} risk signals generados")
+        logger.info(f"✅ Risk analysis: {len(signals)} risk signals generated")
         return signals

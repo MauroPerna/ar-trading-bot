@@ -36,34 +36,34 @@ class PortfolioService:
 
     async def compute_order_size(self, signal: SignalDTO) -> float:
         """
-        Dada una señal, calcula el tamaño de la orden (en unidades del activo).
+        Given a signal, calculates order size (in asset units).
 
-        Convención:
-        - BUY  → tamaño positivo (cantidad a comprar)
-        - SELL → tamaño negativo (cantidad a vender)
-        - HOLD → tamaño 0.0 (no se opera)
+        Convention:
+        - BUY  → positive size (quantity to buy)
+        - SELL → negative size (quantity to sell)
+        - HOLD → size 0.0 (no operation)
         """
         try:
-            # HOLD: no se opera
+            # HOLD: no operation
             if signal.signal_type == SignalTypeEnum.HOLD:
-                logger.info(f"HOLD signal for {signal.symbol}, no se opera.")
+                logger.info(f"HOLD signal for {signal.symbol}, no operation.")
                 return 0.0
 
-            # Precio inválido
+            # Invalid price
             if signal.price is None or signal.price <= 0:
                 logger.warning(
-                    f"Signal sin precio válido para {signal.symbol}: {signal.price}"
+                    f"Signal without valid price for {signal.symbol}: {signal.price}"
                 )
                 return 0.0
 
-            # 1) Obtenemos el portfolio desde el broker (source of truth)
+            # 1) Get portfolio from broker (source of truth)
             portfolio: PortfolioDTO = await self.broker.get_portfolio()
             if portfolio is None:
                 logger.warning(
-                    "No se pudo obtener el portfolio del broker, no se opera.")
+                    "Could not get portfolio from broker, no operations.")
                 return 0.0
 
-            # 2) Leemos los pesos objetivo desde DB (optimizer / timeframe)
+            # 2) Read target weights from DB (optimizer / timeframe)
             async with self.db_client.get_session() as session:
                 portfolio_weights_repo = PortfolioWeightsRepository(session)
                 current_weights = await portfolio_weights_repo.get_active_weights(
@@ -75,14 +75,14 @@ class PortfolioService:
                     ),
                 ) or {}
 
-            # 3) Información básica de la posición actual
+            # 3) Basic info about current position
             symbol = signal.symbol
             side = signal.signal_type
 
-            # Asumo que PortfolioDTO.positions es Dict[str, float] -> quantity
+            # Assuming PortfolioDTO.positions is Dict[str, float] -> quantity
             quantity_on_portfolio = portfolio.positions.get(symbol, 0.0)
 
-            # --- CASO SELL ---
+            # --- SELL CASE ---
             if side == SignalTypeEnum.SELL:
                 if quantity_on_portfolio <= 0.0:
                     logger.info(f"No position to sell for {symbol}.")
@@ -91,16 +91,16 @@ class PortfolioService:
                 logger.info(
                     f"Full position close for {symbol}: {quantity_on_portfolio} units."
                 )
-                # SELL devuelve tamaño negativo
+                # SELL returns negative size
                 return -float(quantity_on_portfolio)
 
-            # --- CASO BUY ---
+            # --- BUY CASE ---
             if side == SignalTypeEnum.BUY:
                 total_portfolio_value = await self.calculate_total_value(portfolio)
 
                 if total_portfolio_value is None or total_portfolio_value <= 0:
                     logger.warning(
-                        "Total portfolio value is zero or negative, no se opera BUY."
+                        "Total portfolio value is zero or negative, no BUY operation."
                     )
                     return 0.0
 
@@ -108,19 +108,19 @@ class PortfolioService:
 
                 if target_weight <= 0:
                     logger.info(
-                        f"Target weight para {symbol} es 0, no se genera orden BUY."
+                        f"Target weight for {symbol} is 0, no BUY order generated."
                     )
                     return 0.0
 
-                # Valor objetivo y actual de la posición
+                # Target and current position value
                 target_value = total_portfolio_value * target_weight
                 current_value = quantity_on_portfolio * signal.price
                 value_to_invest = target_value - current_value
 
-                # Si ya estamos por encima del target, no compramos más
+                # If already above target, don't buy more
                 if value_to_invest <= 0:
                     logger.info(
-                        f"{symbol} ya está por encima del peso objetivo. "
+                        f"{symbol} is already above target weight. "
                         f"current={current_value:.2f}, target={target_value:.2f}"
                     )
                     return 0.0
@@ -129,12 +129,12 @@ class PortfolioService:
 
                 if cash_available <= 0:
                     logger.warning(
-                        f"No hay cash disponible para comprar {symbol}. "
+                        f"No cash available to buy {symbol}. "
                         f"Cash balance: {cash_available:.2f}"
                     )
                     return 0.0
 
-                # Limitamos por cash disponible
+                # Limit by available cash
                 actual_value_to_invest = min(value_to_invest, cash_available)
 
                 if actual_value_to_invest < value_to_invest:
@@ -173,7 +173,7 @@ class PortfolioService:
                 return float(validated_order_size)
 
             logger.warning(
-                f"Signal type {signal.signal_type} no reconocido, no se opera.")
+                f"Signal type {signal.signal_type} not recognized, no operation.")
             return 0.0
 
         except Exception as e:

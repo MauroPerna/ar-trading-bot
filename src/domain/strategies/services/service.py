@@ -50,7 +50,7 @@ class BacktestService:
                 ranked = rank_reports(reports)
                 results[sym] = ranked
             except Exception as e:
-                logger.error(f"❌ Backtest falló para {sym}: {e}")
+                logger.error(f"❌ Backtest failed for {sym}: {e}")
                 results[sym] = []
 
         return results
