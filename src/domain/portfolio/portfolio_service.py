@@ -66,14 +66,16 @@ class PortfolioService:
             # 2) Read target weights from DB (optimizer / timeframe)
             async with self.db_client.get_session() as session:
                 portfolio_weights_repo = PortfolioWeightsRepository(session)
-                current_weights = await portfolio_weights_repo.get_active_weights(
+                weights_list = await portfolio_weights_repo.get_active_weights(
                     timeframe="1h",
                     optimizer_name=(
                         self.optimizer.__class__.__name__
                         if self.optimizer
                         else None
                     ),
-                ) or {}
+                )
+                # Convert list of models to dict {symbol: weight}
+                current_weights = {w.symbol: w.weight for w in weights_list} if weights_list else {}
 
             # 3) Basic info about current position
             symbol = signal.symbol

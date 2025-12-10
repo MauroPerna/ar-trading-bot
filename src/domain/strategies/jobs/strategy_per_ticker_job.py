@@ -20,7 +20,7 @@ class StrategyPerTickerJob:
     async def run(self) -> None:
         logger.info("Starting StrategyPerTickerJob at %s",
                     datetime.now().isoformat())
-        df = await self.pipeline.start(symbols=None, indicators=[])
+        df = await self.pipeline.start(symbols=None, timeframe="1h", indicators=[])
         await self.orchestrator.run_and_persist(
             data=df,
             strategy_names=None,

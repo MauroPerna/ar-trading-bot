@@ -189,7 +189,7 @@ class SymbolStrategyRepository:
         await self.session.refresh(model)
 
         logger.info(
-            f"💾 Guardada mejor estrategia para {symbol}/{timeframe}: "
+            f"💾 Saved best strategy for {symbol}/{timeframe}: "
             f"{strategy_name} (Sharpe={sharpe:.2f}, Ret={ret_pct:.2f}%, DD={max_dd:.2f}%)"
         )
 

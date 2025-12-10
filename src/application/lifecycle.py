@@ -7,6 +7,7 @@ from src.infrastructure.scheduler.scheduler import JobScheduler
 from src.infrastructure.scheduler.cron_expression_enum import CronSchedule
 from src.infrastructure.database.repositories.portfolio_repository import PortfolioRepository
 from src.infrastructure.database.repositories.portfolio_weights_repository import PortfolioWeightsRepository
+from src.infrastructure.database.repositories.symbol_strategy_repository import SymbolStrategyRepository
 from src.infrastructure.config.settings import settings
 from src.domain.strategies.strategies_module import StrategiesModule, StrategyPerTickerJob
 from src.domain.signals.signals_module import SignalsModule, GenerateSignalsJob
@@ -77,7 +78,17 @@ async def lifespan(app: FastAPI):
         )
         logger.info("PortfolioWeigthsJob scheduled")
 
-        # 8) Run PortfolioWeightsJob if no weights exist
+        # 8) Run StrategyPerTickerJob if no active strategies exist
+        async with container.db_client().get_session() as session:
+            strategy_repo = SymbolStrategyRepository(session)
+            existing_strategies = await strategy_repo.get_all_active_strategies(timeframe="1h")
+
+        if not existing_strategies:
+            logger.info("No active strategies found, running initial StrategyPerTickerJob...")
+            await strategy_job.run()
+            logger.info("Initial StrategyPerTickerJob completed")
+
+        # 9) Run PortfolioWeightsJob if no weights exist
         async with container.db_client().get_session() as session:
             weights_repo = PortfolioWeightsRepository(session)
             existing_weights = await weights_repo.get_active_weights(timeframe="1h")
@@ -86,7 +97,6 @@ async def lifespan(app: FastAPI):
             logger.info("No portfolio weights found, running initial PortfolioWeightsJob...")
             await portfolio_weights_job.run()
             logger.info("Initial PortfolioWeightsJob completed")
-
 
         yield
 

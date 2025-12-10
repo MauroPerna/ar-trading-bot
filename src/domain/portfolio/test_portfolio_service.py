@@ -1,25 +1,14 @@
-"""
-Tests para PortfolioService.compute_order_size
-
-Cubre diferentes escenarios:
-- Señales de BUY con diferentes target weights
-- Señales de SELL
-- Casos edge: portfolio vacío, precios inválidos, sin weights activos
-
-VERSIÓN CORREGIDA: Mockea correctamente extractor.get_lastest_price()
-"""
-
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.domain.portfolio.portfolio_service import PortfolioService
+from src.domain.portfolio.dtos.portfolio_dto import PortfolioDTO
 from src.domain.signals.dtos.signal_dto import SignalDTO
 from src.commons.enums.signal_enums import (
     SignalTypeEnum,
     SignalStrengthEnum,
     SignalSourceEnum,
 )
-from src.infrastructure.database.models.portfolio_model import PortfolioModel
 
 
 @pytest.fixture
@@ -44,34 +33,57 @@ def mock_optimizer():
 def mock_extractor():
     """Mock del extractor OHLCVService."""
     extractor = MagicMock()
-    # Mockear el método get_lastest_price como AsyncMock por defecto
     extractor.get_lastest_price = AsyncMock(return_value=150.0)
     return extractor
 
 
 @pytest.fixture
-def portfolio_service(mock_db_client, mock_extractor, mock_optimizer):
+def mock_broker():
+    """Mock del BrokerClient."""
+    broker = MagicMock()
+    broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
+        cash_balance=10000.0,
+        positions={},
+    ))
+    return broker
+
+
+@pytest.fixture
+def portfolio_service(mock_db_client, mock_extractor, mock_optimizer, mock_broker):
     """Instancia del servicio con mocks."""
     return PortfolioService(
         db_client=mock_db_client,
         extractor=mock_extractor,
         optimizer=mock_optimizer,
+        broker=mock_broker,
     )
+
+
+def create_mock_weights_repo(weights_dict):
+    """Helper para crear mock de weights que retorna lista de objetos."""
+    if weights_dict is None:
+        return None
+    weights_list = []
+    for symbol, weight in weights_dict.items():
+        w = MagicMock()
+        w.symbol = symbol
+        w.weight = weight
+        weights_list.append(w)
+    return weights_list
 
 
 # ==================== TESTS DE SEÑALES BUY ====================
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_first_purchase(portfolio_service):
+async def test_buy_signal_first_purchase(portfolio_service, mock_broker):
     """
     Señal BUY para símbolo no existente en portfolio (primera compra).
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=10000.0,
         positions={},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -83,23 +95,13 @@ async def test_buy_signal_first_purchase(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.15}
+            return_value=create_mock_weights_repo({"AAPL": 0.15})
         )
-
-        # No hay posiciones, así que get_lastest_price no se llamará
-        # pero lo dejamos mockeado por si acaso
 
         order_size = await portfolio_service.compute_order_size(signal)
 
@@ -109,18 +111,14 @@ async def test_buy_signal_first_purchase(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_incremental_purchase(portfolio_service):
+async def test_buy_signal_incremental_purchase(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY para símbolo que ya tiene posición (compra incremental).
-
-    Portfolio tiene posiciones, así que calculate_total_value se llamará
-    y necesitará extractor.get_lastest_price()
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=5000.0,
         positions={"AAPL": 20.0},  # 20 * 150 = 3,000
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -132,23 +130,14 @@ async def test_buy_signal_incremental_purchase(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.50}
+            return_value=create_mock_weights_repo({"AAPL": 0.50})
         )
 
-        # CRÍTICO: Mockear get_lastest_price para que retorne el precio de AAPL
-        mock_extractor = portfolio_service.extractor
         mock_extractor.get_lastest_price = AsyncMock(return_value=150.0)
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -163,15 +152,14 @@ async def test_buy_signal_incremental_purchase(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_already_above_target(portfolio_service):
+async def test_buy_signal_already_above_target(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY pero la posición ya está por encima del target weight.
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=2500.0,
         positions={"AAPL": 50.0},  # 50 * 150 = 7,500
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -183,23 +171,14 @@ async def test_buy_signal_already_above_target(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.50}
+            return_value=create_mock_weights_repo({"AAPL": 0.50})
         )
 
-        # Mockear get_lastest_price
-        mock_extractor = portfolio_service.extractor
         mock_extractor.get_lastest_price = AsyncMock(return_value=150.0)
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -212,15 +191,14 @@ async def test_buy_signal_already_above_target(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_zero_target_weight(portfolio_service):
+async def test_buy_signal_zero_target_weight(portfolio_service, mock_broker):
     """
     Señal BUY pero el target weight es 0 (no está en el portfolio óptimo).
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=10000.0,
         positions={},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="TSLA",
@@ -232,19 +210,13 @@ async def test_buy_signal_zero_target_weight(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.30, "MSFT": 0.40, "GOOGL": 0.30}
+            return_value=create_mock_weights_repo(
+                {"AAPL": 0.30, "MSFT": 0.40, "GOOGL": 0.30})
         )
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -256,15 +228,14 @@ async def test_buy_signal_zero_target_weight(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_sell_signal_full_position(portfolio_service):
+async def test_sell_signal_full_position(portfolio_service, mock_broker):
     """
     Señal SELL con posición existente (cierre completo).
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=5000.0,
         positions={"AAPL": 30.0},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -276,18 +247,10 @@ async def test_sell_signal_full_position(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
-
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
-        mock_weights_repo.get_active_weights = AsyncMock(return_value={})
+        mock_weights_repo.get_active_weights = AsyncMock(return_value=[])
 
         order_size = await portfolio_service.compute_order_size(signal)
 
@@ -295,15 +258,14 @@ async def test_sell_signal_full_position(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_sell_signal_no_position(portfolio_service):
+async def test_sell_signal_no_position(portfolio_service, mock_broker):
     """
     Señal SELL pero no hay posición del símbolo.
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=10000.0,
         positions={"MSFT": 20.0},  # Solo MSFT
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -315,18 +277,10 @@ async def test_sell_signal_no_position(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
-
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
-        mock_weights_repo.get_active_weights = AsyncMock(return_value={})
+        mock_weights_repo.get_active_weights = AsyncMock(return_value=[])
 
         order_size = await portfolio_service.compute_order_size(signal)
 
@@ -337,10 +291,12 @@ async def test_sell_signal_no_position(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_no_portfolio_in_db(portfolio_service):
+async def test_no_portfolio_from_broker(portfolio_service, mock_broker):
     """
-    No existe portfolio en la base de datos.
+    Broker no retorna portfolio (None).
     """
+    mock_broker.get_portfolio = AsyncMock(return_value=None)
+
     signal = SignalDTO(
         symbol="AAPL",
         signal_source=SignalSourceEnum.MOMENTUM,
@@ -350,18 +306,9 @@ async def test_no_portfolio_in_db(portfolio_service):
         price=150.0,
     )
 
-    with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo:
+    order_size = await portfolio_service.compute_order_size(signal)
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=None
-        )
-
-        order_size = await portfolio_service.compute_order_size(signal)
-
-        assert order_size == 0.0
+    assert order_size == 0.0
 
 
 @pytest.mark.asyncio
@@ -369,12 +316,6 @@ async def test_invalid_price_in_signal(portfolio_service):
     """
     Señal con precio inválido (None o negativo).
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
-        cash_balance=10000.0,
-        positions={},
-    )
-
     # --- Señal sin precio ---
     signal_no_price = SignalDTO(
         symbol="AAPL",
@@ -385,18 +326,8 @@ async def test_invalid_price_in_signal(portfolio_service):
         price=None,
     )
 
-    with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo:
-
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
-        order_size = await portfolio_service.compute_order_size(signal_no_price)
-
-        assert order_size == 0.0
+    order_size = await portfolio_service.compute_order_size(signal_no_price)
+    assert order_size == 0.0
 
     # --- Señal con precio negativo ---
     signal_negative_price = SignalDTO(
@@ -408,32 +339,19 @@ async def test_invalid_price_in_signal(portfolio_service):
         price=-100.0,
     )
 
-    with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo:
-
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
-        order_size = await portfolio_service.compute_order_size(
-            signal_negative_price
-        )
-
-        assert order_size == 0.0
+    order_size = await portfolio_service.compute_order_size(signal_negative_price)
+    assert order_size == 0.0
 
 
 @pytest.mark.asyncio
-async def test_zero_total_portfolio_value(portfolio_service):
+async def test_zero_total_portfolio_value(portfolio_service, mock_broker):
     """
     Portfolio con valor total en 0 o negativo.
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=0.0,
         positions={},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -445,19 +363,12 @@ async def test_zero_total_portfolio_value(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.15}
+            return_value=create_mock_weights_repo({"AAPL": 0.15})
         )
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -466,15 +377,14 @@ async def test_zero_total_portfolio_value(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_no_active_weights(portfolio_service):
+async def test_no_active_weights(portfolio_service, mock_broker):
     """
     No hay weights activos del optimizador.
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=10000.0,
         positions={},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -486,15 +396,8 @@ async def test_no_active_weights(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
-
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
 
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(return_value=None)
@@ -508,15 +411,14 @@ async def test_no_active_weights(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_with_constraints_validation(portfolio_service):
+async def test_buy_with_constraints_validation(portfolio_service, mock_broker):
     """
     Señal BUY que debe pasar por validate_weights (constraints).
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=10000.0,
         positions={},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -528,21 +430,14 @@ async def test_buy_with_constraints_validation(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo, patch(
         "src.domain.portfolio.portfolio_service.validate_weights"
     ) as mock_validate:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.20}
+            return_value=create_mock_weights_repo({"AAPL": 0.20})
         )
 
         mock_validate.return_value = {"AAPL": 0.20}
@@ -559,19 +454,18 @@ async def test_buy_with_constraints_validation(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_multiple_positions_portfolio(portfolio_service):
+async def test_multiple_positions_portfolio(portfolio_service, mock_broker, mock_extractor):
     """
     Portfolio con múltiples posiciones, señal para una de ellas.
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=5000.0,
         positions={
             "AAPL": 20.0,   # @ 150 = 3,000
             "MSFT": 30.0,   # @ 200 = 6,000
             "GOOGL": 10.0,  # @ 600 = 6,000
         },
-    )
+    ))
 
     signal = SignalDTO(
         symbol="MSFT",
@@ -583,29 +477,19 @@ async def test_multiple_positions_portfolio(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={
+            return_value=create_mock_weights_repo({
                 "AAPL": 0.30,
                 "MSFT": 0.40,
                 "GOOGL": 0.30,
-            }
+            })
         )
 
-        # CRÍTICO: Mockear get_lastest_price para retornar precios según el símbolo
-        mock_extractor = portfolio_service.extractor
-
-        async def get_price_side_effect(symbol, **kwargs):
+        async def get_price_side_effect(symbol, **_):
             """Retorna precios diferentes según el símbolo."""
             prices = {
                 "AAPL": 150.0,
@@ -632,7 +516,7 @@ async def test_multiple_positions_portfolio(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_exception_handling(portfolio_service):
+async def test_exception_handling(portfolio_service, mock_broker):
     """
     Se lanza una excepción durante el proceso.
     """
@@ -645,48 +529,29 @@ async def test_exception_handling(portfolio_service):
         price=150.0,
     )
 
-    with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo:
+    mock_broker.get_portfolio = AsyncMock(
+        side_effect=Exception("Broker connection error")
+    )
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            side_effect=Exception("Database error")
-        )
-
-        with pytest.raises(Exception, match="Database error"):
-            await portfolio_service.compute_order_size(signal)
+    with pytest.raises(Exception, match="Broker connection error"):
+        await portfolio_service.compute_order_size(signal)
 
 
 # ==================== TESTS DE CASH LIMITADO ====================
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_insufficient_cash(portfolio_service):
+async def test_buy_signal_insufficient_cash(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY con cash insuficiente para alcanzar el target completo.
-
-    Escenario:
-    - Portfolio: $10,000 total
-    - Cash: $300 disponible
-    - Posiciones: AAPL 50 units @ $150 = $7,500
-                  MSFT 10 units @ $200 = $2,000
-    - Total value: 300 + 7,500 + 2,000 = 9,800
-    - Target weight AAPL: 80% = $7,840
-    - Current AAPL value: $7,500
-    - Necesita: $340
-    - Cash disponible: $300 ❌ Insuficiente
-
-    Resultado esperado: Solo compra lo que puede con $300
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=300.0,  # Solo $300 disponible
         positions={
             "AAPL": 50.0,  # $7,500
             "MSFT": 10.0,  # $2,000
         },
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -698,25 +563,15 @@ async def test_buy_signal_insufficient_cash(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.80, "MSFT": 0.20}
+            return_value=create_mock_weights_repo({"AAPL": 0.80, "MSFT": 0.20})
         )
 
-        # Mock extractor para calcular total value
-        mock_extractor = portfolio_service.extractor
-
-        async def get_price_side_effect(symbol, **kwargs):
+        async def get_price_side_effect(symbol, **_):
             prices = {"AAPL": 150.0, "MSFT": 200.0}
             return prices.get(symbol, 100.0)
 
@@ -735,22 +590,14 @@ async def test_buy_signal_insufficient_cash(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_no_cash_available(portfolio_service):
+async def test_buy_signal_no_cash_available(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY pero NO hay cash disponible (cash = 0).
-
-    Escenario:
-    - Cash: $0
-    - Posiciones existentes: AAPL 50 units @ $150 = $7,500
-    - Target weight AAPL: 80% 
-
-    Resultado esperado: order_size = 0 (no puede comprar sin cash)
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
-        cash_balance=0.0,  # ❌ Sin cash
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
+        cash_balance=0.0,  # Sin cash
         positions={"AAPL": 50.0},  # $7,500
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -762,22 +609,14 @@ async def test_buy_signal_no_cash_available(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.80}
+            return_value=create_mock_weights_repo({"AAPL": 0.80})
         )
 
-        mock_extractor = portfolio_service.extractor
         mock_extractor.get_lastest_price = AsyncMock(return_value=150.0)
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -787,32 +626,18 @@ async def test_buy_signal_no_cash_available(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_partial_cash_multiple_symbols(portfolio_service):
+async def test_buy_signal_partial_cash_multiple_symbols(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY con cash limitado en portfolio con múltiples posiciones.
-
-    Escenario:
-    - Cash: $500
-    - Posiciones: AAPL 10 units @ $150 = $1,500
-                  MSFT 5 units @ $200 = $1,000
-                  GOOGL 2 units @ $600 = $1,200
-    - Total value: 500 + 1,500 + 1,000 + 1,200 = $4,200
-    - Target MSFT: 40% = $1,680
-    - Current MSFT: $1,000
-    - Necesita: $680
-    - Cash disponible: $500 ❌ Solo puede invertir $500
-
-    Resultado: Compra solo $500 worth de MSFT = 2.5 units
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=500.0,  # $500 disponible
         positions={
             "AAPL": 10.0,   # $1,500
             "MSFT": 5.0,    # $1,000
             "GOOGL": 2.0,   # $1,200
         },
-    )
+    ))
 
     signal = SignalDTO(
         symbol="MSFT",
@@ -824,28 +649,19 @@ async def test_buy_signal_partial_cash_multiple_symbols(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={
+            return_value=create_mock_weights_repo({
                 "AAPL": 0.30,
                 "MSFT": 0.40,
                 "GOOGL": 0.30,
-            }
+            })
         )
 
-        mock_extractor = portfolio_service.extractor
-
-        async def get_price_side_effect(symbol, **kwargs):
+        async def get_price_side_effect(symbol, **_):
             prices = {
                 "AAPL": 150.0,
                 "MSFT": 200.0,
@@ -868,26 +684,14 @@ async def test_buy_signal_partial_cash_multiple_symbols(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_exact_cash_needed(portfolio_service):
+async def test_buy_signal_exact_cash_needed(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY donde el cash disponible es exactamente lo que se necesita.
-
-    Escenario:
-    - Cash: $1,000
-    - Posiciones: AAPL 20 units @ $150 = $3,000
-    - Total value: 1,000 + 3,000 = $4,000
-    - Target AAPL: 100% = $4,000
-    - Current AAPL: $3,000
-    - Necesita: $1,000
-    - Cash disponible: $1,000 ✅ Perfecto!
-
-    Resultado: Compra exactamente $1,000 / $150 = 6.67 units
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
         cash_balance=1000.0,
         positions={"AAPL": 20.0},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -899,22 +703,15 @@ async def test_buy_signal_exact_cash_needed(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 1.00}  # 100% en AAPL
+            return_value=create_mock_weights_repo(
+                {"AAPL": 1.00})  # 100% en AAPL
         )
 
-        mock_extractor = portfolio_service.extractor
         mock_extractor.get_lastest_price = AsyncMock(return_value=150.0)
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -930,21 +727,14 @@ async def test_buy_signal_exact_cash_needed(portfolio_service):
 
 
 @pytest.mark.asyncio
-async def test_buy_signal_negative_cash_balance(portfolio_service):
+async def test_buy_signal_negative_cash_balance(portfolio_service, mock_broker, mock_extractor):
     """
     Señal BUY con cash balance negativo (edge case raro pero posible).
-
-    Escenario:
-    - Cash: -$100 (cuenta en negativo)
-    - Posiciones: AAPL 50 units @ $150 = $7,500
-
-    Resultado esperado: order_size = 0 (no puede comprar con cash negativo)
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
-        cash_balance=-100.0,  # ❌ Cash negativo
+    mock_broker.get_portfolio = AsyncMock(return_value=PortfolioDTO(
+        cash_balance=-100.0,  # Cash negativo
         positions={"AAPL": 50.0},
-    )
+    ))
 
     signal = SignalDTO(
         symbol="AAPL",
@@ -956,22 +746,14 @@ async def test_buy_signal_negative_cash_balance(portfolio_service):
     )
 
     with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo, patch(
         "src.domain.portfolio.portfolio_service.PortfolioWeightsRepository"
     ) as MockWeightsRepo:
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
         mock_weights_repo = MockWeightsRepo.return_value
         mock_weights_repo.get_active_weights = AsyncMock(
-            return_value={"AAPL": 0.90}
+            return_value=create_mock_weights_repo({"AAPL": 0.90})
         )
 
-        mock_extractor = portfolio_service.extractor
         mock_extractor.get_lastest_price = AsyncMock(return_value=150.0)
 
         order_size = await portfolio_service.compute_order_size(signal)
@@ -984,12 +766,6 @@ async def test_hold_signal_no_action(portfolio_service):
     """
     Señal HOLD (no se espera acción de compra o venta).
     """
-    portfolio = PortfolioModel(
-        id="portfolio-1",
-        cash_balance=5000.0,
-        positions={"AAPL": 20.0},
-    )
-
     signal = SignalDTO(
         symbol="AAPL",
         signal_source=SignalSourceEnum.MOMENTUM,
@@ -999,18 +775,9 @@ async def test_hold_signal_no_action(portfolio_service):
         price=150.0,
     )
 
-    with patch(
-        "src.domain.portfolio.portfolio_service.PortfolioRepository"
-    ) as MockPortfolioRepo:
+    order_size = await portfolio_service.compute_order_size(signal)
 
-        mock_portfolio_repo = MockPortfolioRepo.return_value
-        mock_portfolio_repo.get_current_portfolio = AsyncMock(
-            return_value=portfolio
-        )
-
-        order_size = await portfolio_service.compute_order_size(signal)
-
-        assert order_size == 0.0
+    assert order_size == 0.0
 
 
 if __name__ == "__main__":
