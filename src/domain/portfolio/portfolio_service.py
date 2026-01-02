@@ -8,7 +8,7 @@ from src.domain.portfolio.risk.constraints import (
     PortfolioConstraints,
     validate_weights,
 )
-from src.infrastructure.data.ohlcv_base import OHLCVService
+from src.infrastructure.data.market_data_base import MarketDataService
 from src.infrastructure.database.client import PostgresClient
 from src.infrastructure.database.repositories.portfolio_weights_repository import (
     PortfolioWeightsRepository,
@@ -24,7 +24,7 @@ class PortfolioService:
     def __init__(
         self,
         db_client: PostgresClient,
-        extractor: OHLCVService,
+        extractor: MarketDataService,
         optimizer: Optional[BaseOptimizer],
         broker: BrokerClient,
     ):
@@ -75,7 +75,8 @@ class PortfolioService:
                     ),
                 )
                 # Convert list of models to dict {symbol: weight}
-                current_weights = {w.symbol: w.weight for w in weights_list} if weights_list else {}
+                current_weights = {
+                    w.symbol: w.weight for w in weights_list} if weights_list else {}
 
             # 3) Basic info about current position
             symbol = signal.symbol

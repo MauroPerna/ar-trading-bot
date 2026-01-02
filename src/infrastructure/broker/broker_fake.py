@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable, Awaitable
 from uuid import uuid4
 
-from src.infrastructure.data.ohlcv_base import OHLCVService
+from src.infrastructure.data.market_data_base import MarketDataService
 from src.infrastructure.broker.broker_base import BrokerClient
 from src.commons.enums.broker_enums import Instruments, Countries
 from src.domain.trading.dtos.order_dto import OrderDTO, OrderStatus, OrderSide
@@ -26,7 +26,7 @@ class FakeBrokerClient(BrokerClient):
     def __init__(
         self,
         db_client: PostgresClient,
-        price_provider: OHLCVService,
+        price_provider: MarketDataService,
         initial_cash: float = 1_000_000.0,
     ):
         self.db_client = db_client
